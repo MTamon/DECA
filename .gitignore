@@ -47,3 +47,5 @@ __pycache__
 cluster_scripts
 internal
 *TestSamples*
+
+data/FLAME2020/*
