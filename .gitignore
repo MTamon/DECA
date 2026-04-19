@@ -49,3 +49,5 @@ internal
 *TestSamples*
 
 data/FLAME2020/*
+
+decalib/utils/rasterizer/standard_rasterize_cuda.egg-info
