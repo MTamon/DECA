@@ -103,7 +103,10 @@ class DECA(nn.Module):
         if model_cfg.use_tex:
             self.flametex = FLAMETex(model_cfg).to(self.device)
         self.D_detail = Generator(
-            latent_dim=self.n_detail + self.n_cond, out_channels=1, out_scale=model_cfg.max_z, sample_mode="bilinear"
+            latent_dim=self.n_detail + self.n_cond,
+            out_channels=1,
+            out_scale=model_cfg.max_z,
+            sample_mode="bilinear",
         ).to(self.device)
         # resume model
         model_path = self.cfg.pretrained_modelpath
@@ -203,7 +206,9 @@ class DECA(nn.Module):
 
         ## decode
         verts, landmarks2d, landmarks3d = self.flame(
-            shape_params=codedict["shape"], expression_params=codedict["exp"], pose_params=codedict["pose"]
+            shape_params=codedict["shape"],
+            expression_params=codedict["exp"],
+            pose_params=codedict["pose"],
         )
         if self.cfg.model.use_tex:
             albedo = self.flametex(codedict["tex"])
@@ -213,13 +218,11 @@ class DECA(nn.Module):
 
         ## projection
         landmarks2d = util.batch_orth_proj(landmarks2d, codedict["cam"])[:, :, :2]
-        landmarks2d[:, :, 1:] = -landmarks2d[
-            :, :, 1:
-        ]  # ; landmarks2d = landmarks2d*self.image_size/2 + self.image_size/2
+        landmarks2d[:, :, 1:] = -landmarks2d[:, :, 1:]
+        # landmarks2d = landmarks2d*self.image_size/2 + self.image_size/2
         landmarks3d = util.batch_orth_proj(landmarks3d, codedict["cam"])
-        landmarks3d[:, :, 1:] = -landmarks3d[
-            :, :, 1:
-        ]  # ; landmarks3d = landmarks3d*self.image_size/2 + self.image_size/2
+        landmarks3d[:, :, 1:] = -landmarks3d[:, :, 1:]
+        # landmarks3d = landmarks3d*self.image_size/2 + self.image_size/2
         trans_verts = util.batch_orth_proj(verts, codedict["cam"])
         trans_verts[:, :, 1:] = -trans_verts[:, :, 1:]
         opdict = {
@@ -257,9 +260,19 @@ class DECA(nn.Module):
             opdict["albedo"] = albedo
 
         if use_detail:
-            uv_z = self.D_detail(torch.cat([codedict["pose"][:, 3:], codedict["exp"], codedict["detail"]], dim=1))
+            uv_z = self.D_detail(
+                torch.cat(
+                    [codedict["pose"][:, 3:], codedict["exp"], codedict["detail"]],
+                    dim=1,
+                )
+            )
             if iddict is not None:
-                uv_z = self.D_detail(torch.cat([iddict["pose"][:, 3:], iddict["exp"], codedict["detail"]], dim=1))
+                uv_z = self.D_detail(
+                    torch.cat(
+                        [iddict["pose"][:, 3:], iddict["exp"], codedict["detail"]],
+                        dim=1,
+                    )
+                )
             uv_detail_normals = self.displacement2normal(uv_z, verts, ops["normals"])
             uv_shading = self.render.add_SHlight(uv_detail_normals, codedict["light"])
             uv_texture = albedo * uv_shading
@@ -281,23 +294,28 @@ class DECA(nn.Module):
             )
             detail_normal_images = F.grid_sample(uv_detail_normals, grid, align_corners=False) * alpha_images
             shape_detail_images = self.render.render_shape(
-                verts, trans_verts, detail_normal_images=detail_normal_images, h=h, w=w, images=background
+                verts,
+                trans_verts,
+                detail_normal_images=detail_normal_images,
+                h=h,
+                w=w,
+                images=background,
             )
 
             ## extract texture
             ## TODO: current resolution 256x256, support higher resolution, and add visibility
             uv_pverts = self.render.world2uv(trans_verts)
             uv_gt = F.grid_sample(
-                images, uv_pverts.permute(0, 2, 3, 1)[:, :, :, :2], mode="bilinear", align_corners=False
+                images,
+                uv_pverts.permute(0, 2, 3, 1)[:, :, :, :2],
+                mode="bilinear",
+                align_corners=False,
             )
             if self.cfg.model.use_tex:
                 ## TODO: poisson blending should give better-looking results
-                if self.cfg.model.extract_tex:
-                    uv_texture_gt = uv_gt[:, :3, :, :] * self.uv_face_eye_mask + (
-                        uv_texture[:, :3, :, :] * (1 - self.uv_face_eye_mask)
-                    )
-                else:
-                    uv_texture_gt = uv_texture[:, :3, :, :]
+                uv_texture_gt = uv_gt[:, :3, :, :] * self.uv_face_eye_mask + (
+                    uv_texture[:, :3, :, :] * (1 - self.uv_face_eye_mask)
+                )
             else:
                 uv_texture_gt = uv_gt[:, :3, :, :] * self.uv_face_eye_mask + (
                     torch.ones_like(uv_gt[:, :3, :, :]) * (1 - self.uv_face_eye_mask) * 0.7
@@ -354,7 +372,13 @@ class DECA(nn.Module):
         # save coarse mesh, with texture and normal map
         normal_map = util.tensor2image(opdict["uv_detail_normals"][i] * 0.5 + 0.5)
         util.write_obj(
-            filename, vertices, faces, texture=texture, uvcoords=uvcoords, uvfaces=uvfaces, normal_map=normal_map
+            filename,
+            vertices,
+            faces,
+            texture=texture,
+            uvcoords=uvcoords,
+            uvfaces=uvfaces,
+            normal_map=normal_map,
         )
         # upsample mesh, save detailed mesh
         texture = texture[:, :, [2, 1, 0]]

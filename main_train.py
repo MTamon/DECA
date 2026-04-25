@@ -1,5 +1,4 @@
-""" training script of DECA
-"""
+"""training script of DECA"""
 
 import os, sys
 import numpy as np
@@ -8,14 +7,11 @@ import torch
 import torch.backends.cudnn as cudnn
 import shutil
 
-# from copy import deepcopy
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), ".")))
 np.random.seed(0)
 
 
-def main(cfg):  # pylint: redefined-outer-name
-    """main function for training DECA"""
+def main(cfg):
     # creat folders
     os.makedirs(os.path.join(cfg.output_dir, cfg.train.log_dir), exist_ok=True)
     os.makedirs(os.path.join(cfg.output_dir, cfg.train.vis_dir), exist_ok=True)

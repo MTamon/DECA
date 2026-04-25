@@ -16,7 +16,7 @@
 import os, sys
 import cv2
 import numpy as np
-from time import time
+from scipy.io import savemat
 import argparse
 import torch
 
@@ -42,7 +42,6 @@ def main(args):
     # identity reference
     i = 0
     name = testdata[i]['imagename']
-    savepath = '{}/{}.jpg'.format(savefolder, name)
     images = testdata[i]['image'].to(device)[None,...]
     with torch.no_grad():
         id_codedict = deca.encode(images)
@@ -67,7 +66,6 @@ def main(args):
         os.makedirs(os.path.join(savefolder, name, 'animation'), exist_ok=True)
     
     # -- save results
-    image_name = name
     for save_type in ['reconstruction', 'animation']:
         if save_type == 'reconstruction':
             visdict = id_codedict; opdict = id_opdict
