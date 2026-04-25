@@ -16,7 +16,6 @@
 import os, sys
 import cv2
 import numpy as np
-from time import time
 from scipy.io import savemat
 import argparse
 from tqdm import tqdm
@@ -27,7 +26,6 @@ from decalib.deca import DECA
 from decalib.datasets import datasets 
 from decalib.utils import util
 from decalib.utils.config import cfg as deca_cfg
-from decalib.utils.tensor_cropper import transform_points
 
 def main(args):
     # if args.rasterizer_type != 'standard':
