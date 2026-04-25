@@ -16,7 +16,6 @@
 import os, sys
 import cv2
 import numpy as np
-from time import time
 import argparse
 import torch
 
@@ -42,7 +41,6 @@ def main(args):
     # identity reference
     i = 0
     name = testdata[i]['imagename']
-    savepath = '{}/{}.jpg'.format(savefolder, name)
     images = testdata[i]['image'].to(device)[None,...]
     with torch.no_grad():
         id_codedict = deca.encode(images)
