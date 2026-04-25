@@ -16,7 +16,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import pickle
+import pickle,os
 import torch.nn.functional as F
 
 from .lbs import lbs, batch_rodrigues, vertices2landmarks, rot_mat_to_euler
@@ -89,7 +89,13 @@ class FLAME(nn.Module):
             neck_kin_chain.append(curr_idx)
             curr_idx = self.parents[curr_idx]
         self.register_buffer('neck_kin_chain', torch.stack(neck_kin_chain))
-        
+
+        file_path=os.path.dirname(config.flame_model_path)
+        l_eyelid=torch.from_numpy(np.load(f'{file_path}/l_eyelid.npy')).to(torch.float)[None]
+        r_eyelid=torch.from_numpy(np.load(f'{file_path}/r_eyelid.npy')).to(torch.float)[None]
+        self.register_buffer('r_eyelid', r_eyelid.to(self.dtype))
+        self.register_buffer('l_eyelid', l_eyelid.to(self.dtype))
+
     def _find_dynamic_lmk_idx_and_bcoords(self, pose, dynamic_lmk_faces_idx,
                                           dynamic_lmk_b_coords,
                                           neck_kin_chain, dtype=torch.float32):
@@ -172,7 +178,8 @@ class FLAME(nn.Module):
                                        self.full_lmk_bary_coords.repeat(vertices.shape[0], 1, 1))
         return landmarks3d
 
-    def forward(self, shape_params=None, expression_params=None, pose_params=None, eye_pose_params=None):
+    def forward(self, shape_params=None, expression_params=None, pose_params=None, eye_pose_params=None,
+                neck_pose_params=None, full_pose=None,eyelid_params=None,translation_params=None):
         """
             Input:
                 shape_params: N X number of shape parameters
@@ -183,18 +190,26 @@ class FLAME(nn.Module):
                 landmarks: N X number of landmarks X 3
         """
         batch_size = shape_params.shape[0]
-        if pose_params is None:
-            pose_params = self.eye_pose.expand(batch_size, -1)
-        if eye_pose_params is None:
-            eye_pose_params = self.eye_pose.expand(batch_size, -1)
+        if full_pose is None:
+            if pose_params is None:
+                pose_params = self.eye_pose.expand(batch_size, -1)
+            if eye_pose_params is None:
+                eye_pose_params = self.eye_pose.expand(batch_size, -1)
+            if neck_pose_params is None:
+                neck_pose_params = self.neck_pose.expand(batch_size, -1)
+            full_pose = torch.cat([pose_params[:, :3], neck_pose_params, pose_params[:, 3:], eye_pose_params], dim=1)
+
         betas = torch.cat([shape_params, expression_params], dim=1)
-        full_pose = torch.cat([pose_params[:, :3], self.neck_pose.expand(batch_size, -1), pose_params[:, 3:], eye_pose_params], dim=1)
         template_vertices = self.v_template.unsqueeze(0).expand(batch_size, -1, -1)
 
         vertices, _ = lbs(betas, full_pose, template_vertices,
                           self.shapedirs, self.posedirs,
                           self.J_regressor, self.parents,
-                          self.lbs_weights, dtype=self.dtype)
+                          self.lbs_weights,eyelid_params=eyelid_params,
+                          l_eyelid_dirs=self.l_eyelid,r_eyelid_dirs=self.r_eyelid, dtype=self.dtype)
+        if translation_params is not None:
+            # print(vertices.shape, translation_params.shape)
+            vertices += translation_params
 
         lmk_faces_idx = self.lmk_faces_idx.unsqueeze(dim=0).expand(batch_size, -1)
         lmk_bary_coords = self.lmk_bary_coords.unsqueeze(dim=0).expand(batch_size, -1, -1)

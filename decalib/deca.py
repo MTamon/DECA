@@ -292,12 +292,9 @@ class DECA(nn.Module):
             )
             if self.cfg.model.use_tex:
                 ## TODO: poisson blending should give better-looking results
-                if self.cfg.model.extract_tex:
-                    uv_texture_gt = uv_gt[:, :3, :, :] * self.uv_face_eye_mask + (
-                        uv_texture[:, :3, :, :] * (1 - self.uv_face_eye_mask)
-                    )
-                else:
-                    uv_texture_gt = uv_texture[:, :3, :, :]
+                uv_texture_gt = uv_gt[:, :3, :, :] * self.uv_face_eye_mask + (
+                    uv_texture[:, :3, :, :] * (1 - self.uv_face_eye_mask)
+                )
             else:
                 uv_texture_gt = uv_gt[:, :3, :, :] * self.uv_face_eye_mask + (
                     torch.ones_like(uv_gt[:, :3, :, :]) * (1 - self.uv_face_eye_mask) * 0.7
