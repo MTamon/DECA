@@ -33,37 +33,33 @@ def set_rasterizer(type="pytorch3d"):
         import os
         from .util import load_obj
 
-        # # Prefer a prebuilt local extension if available, then fallback to JIT.
-        # # This avoids ModuleNotFoundError when JIT build is not possible.
-        # try:
-        #     from .rasterizer.standard_rasterize_cuda import standard_rasterize  # built via setup.py -i
-        # except Exception as e_rel:
-        #     # Use JIT Compiling Extensions as a fallback
-        #     # ref: https://pytorch.org/tutorials/advanced/cpp_extension.html
-        #     try:
-        from torch.utils.cpp_extension import load, CUDA_HOME
+        # Prefer a prebuilt local extension if available, then fall back to JIT.
+        # JIT's load() can return without raising while leaving the module
+        # un-importable by name (stale cache, partial build, etc.), which then
+        # triggers ModuleNotFoundError on the subsequent `from ... import`.
+        try:
+            from .rasterizer.standard_rasterize_cuda import standard_rasterize  # built via setup.py -i
+        except Exception as e_rel:
+            try:
+                from torch.utils.cpp_extension import load, CUDA_HOME
 
-        curr_dir = os.path.dirname(__file__)
-        load(
-            name="standard_rasterize_cuda",
-            sources=[
-                f"{curr_dir}/rasterizer/standard_rasterize_cuda.cpp",
-                f"{curr_dir}/rasterizer/standard_rasterize_cuda_kernel.cu",
-            ],
-            extra_cuda_cflags=["-std=c++17"],
-        )
-        from standard_rasterize_cuda import standard_rasterize
-            # except Exception as e_jit:
-            #     raise ImportError(
-            #         "Failed to import or build standard_rasterize_cuda. "
-            #         "Build locally: (cd decalib/utils/rasterizer && python setup.py build_ext -i) "
-            #         "or run with --rasterizer_type=pytorch3d.\n"
-            #         f"Relative import error: {e_rel}\nJIT error: {e_jit}"
-            #     )
-        
-        # If JIT does not work, try manually installation first
-        # 1. see instruction here: pixielib/utils/rasterizer/INSTALL.md
-        # 2. add this: "from .rasterizer.standard_rasterize_cuda import standard_rasterize" here
+                curr_dir = os.path.dirname(__file__)
+                load(
+                    name="standard_rasterize_cuda",
+                    sources=[
+                        f"{curr_dir}/rasterizer/standard_rasterize_cuda.cpp",
+                        f"{curr_dir}/rasterizer/standard_rasterize_cuda_kernel.cu",
+                    ],
+                    extra_cuda_cflags=["-std=c++17"],
+                )
+                from standard_rasterize_cuda import standard_rasterize
+            except Exception as e_jit:
+                raise ImportError(
+                    "Failed to import or build standard_rasterize_cuda. "
+                    "Build locally: (cd decalib/utils/rasterizer && python setup.py build_ext -i) "
+                    "or run with --rasterizer_type=pytorch3d.\n"
+                    f"Relative import error: {e_rel}\nJIT error: {e_jit}"
+                )
 
 
 class StandardRasterizer(nn.Module):
