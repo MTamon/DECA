@@ -51,3 +51,6 @@ internal
 data/FLAME2020/*
 
 decalib/utils/rasterizer/standard_rasterize_cuda.egg-info
+data/l_eyelid.npy
+data/r_eyelid.npy
+data/mediapipe_landmark_embedding.npz
