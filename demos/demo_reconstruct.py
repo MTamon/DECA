@@ -42,15 +42,16 @@ def main(args):
     # run DECA
     deca_cfg.model.use_tex = args.useTex
     deca_cfg.rasterizer_type = args.rasterizer_type
-    deca_cfg.model.extract_tex = args.extractTex
     deca = DECA(config = deca_cfg, device=device)
     # for i in range(len(testdata)):
+    code = {}
     for i in tqdm(range(len(testdata))):
         name = testdata[i]['imagename']
+        basename=testdata[i]["image_basename"]
         images = testdata[i]['image'].to(device)[None,...]
         with torch.no_grad():
             codedict = deca.encode(images)
-            opdict, visdict = deca.decode(codedict) #tensor
+            # opdict, visdict = deca.decode(codedict) #tensor
             if args.render_orig:
                 tform = testdata[i]['tform'][None, ...]
                 tform = torch.inverse(tform).transpose(1,2).to(device)
@@ -70,6 +71,13 @@ def main(args):
             np.savetxt(os.path.join(savefolder, name, name + '_kpt3d.txt'), opdict['landmarks3d'][0].cpu().numpy())
         if args.saveObj:
             deca.save_obj(os.path.join(savefolder, name, name + '.obj'), opdict)
+        if args.saveCode:
+            dict = {}
+            for k, v in codedict.items():
+                if k in ['pose', 'cam', 'exp', 'shape']:
+                    dict[k] = v.detach().cpu().numpy().tolist()
+            # code[name] = dict
+            code[basename]=dict
         if args.saveMat:
             opdict = util.dict_tensor2npy(opdict)
             savemat(os.path.join(savefolder, name, name + '.mat'), opdict)
@@ -86,6 +94,10 @@ def main(args):
                 if args.render_orig:
                     image = util.tensor2image(orig_visdict[vis_name][0])
                     cv2.imwrite(os.path.join(savefolder, name, 'orig_' + name + '_' + vis_name +'.jpg'), util.tensor2image(orig_visdict[vis_name][0]))
+    if args.saveCode:
+        import json
+        json_folder = savefolder.replace('deca', '')
+        json.dump(code, open(os.path.join(json_folder, 'code.json'), 'w'))
     print(f'-- please check the results in {savefolder}')
         
 if __name__ == '__main__':
@@ -113,8 +125,6 @@ if __name__ == '__main__':
     parser.add_argument('--useTex', default=False, type=lambda x: x.lower() in ['true', '1'],
                         help='whether to use FLAME texture model to generate uv texture map, \
                             set it to True only if you downloaded texture model' )
-    parser.add_argument('--extractTex', default=True, type=lambda x: x.lower() in ['true', '1'],
-                        help='whether to extract texture from input image as the uv texture map, set false if you want albeo map from FLAME mode' )
     parser.add_argument('--saveVis', default=True, type=lambda x: x.lower() in ['true', '1'],
                         help='whether to save visualization of output' )
     parser.add_argument('--saveKpt', default=False, type=lambda x: x.lower() in ['true', '1'],
@@ -126,6 +136,8 @@ if __name__ == '__main__':
                             Note that saving objs could be slow' )
     parser.add_argument('--saveMat', default=False, type=lambda x: x.lower() in ['true', '1'],
                         help='whether to save outputs as .mat' )
+    parser.add_argument('--saveCode', default=True, type=lambda x: x.lower() in ['true', '1'],
+                        help='whether to save FLAME parameters')
     parser.add_argument('--saveImages', default=False, type=lambda x: x.lower() in ['true', '1'],
                         help='whether to save visualization output as seperate images' )
     main(parser.parse_args())
