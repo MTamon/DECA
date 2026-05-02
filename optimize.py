@@ -50,6 +50,23 @@ def inverse_projection(points2d, K, c2w):
 
     return rays_o, rays_d
 
+def masked_l2_distance(verts1, verts2, valid_mask):
+    """Frame-wise masked variant of lossfunc.l2_distance.
+
+    valid_mask is a 1-D bool tensor of length B. Frames with valid_mask=False
+    are excluded from the mean. Used so iris-supervision can be silenced on
+    frames where preprocess/iris.py failed to detect a face (the iris values
+    in `landmark` are placeholders carried forward from the nearest valid
+    frame, but they should not contribute to the loss).
+    """
+    if valid_mask is None or bool(valid_mask.all()):
+        return lossfunc.l2_distance(verts1, verts2)
+    if not bool(valid_mask.any()):
+        return verts1.new_zeros(())
+    per_frame = torch.sqrt(((verts1 - verts2) ** 2).sum(2)).mean(1)
+    return per_frame[valid_mask].mean()
+
+
 def eyelid_close_loss(opt_lmks, target_lmks):
     upper_eyelid_lmk_ids = [ 37, 38, 43,44]
     lower_eyelid_lmk_ids = [41,40,47,46]
@@ -75,7 +92,7 @@ class Optimizer(object):
             self.with_translation_camera=args.with_translation_camera
 
     def optimize(self, shape, exp, landmark, pose, name, visualize_images, savefolder, intrinsics, json_path, size,
-                 save_name,args):
+                 save_name, args, iris_valid=None):
         # 
         num_img = pose.shape[0]
         # we need to project to [-1, 1] instead of [0, size], hence modifying the cam_intrinsics as below
@@ -168,7 +185,20 @@ class Optimizer(object):
 
             trans_landmarks2d = projection(landmarks2d_p, cam_intrinsics, w2c_p)
             ## landmark loss
-            landmark_loss2 = lossfunc.l2_distance(trans_landmarks2d[:, :len_landmark, :2], landmark[:, :len_landmark])
+            if use_iris and iris_valid is not None and len_landmark >= 2:
+                # Split face (first len_landmark-2) vs iris (last 2) so that
+                # frames with no iris detection do not contribute to the iris
+                # term. Face landmarks are always present (FAN 68pt).
+                face_loss = lossfunc.l2_distance(
+                    trans_landmarks2d[:, :len_landmark - 2, :2],
+                    landmark[:, :len_landmark - 2])
+                iris_loss = masked_l2_distance(
+                    trans_landmarks2d[:, len_landmark - 2:len_landmark, :2],
+                    landmark[:, len_landmark - 2:len_landmark],
+                    iris_valid)
+                landmark_loss2 = face_loss + iris_loss
+            else:
+                landmark_loss2 = lossfunc.l2_distance(trans_landmarks2d[:, :len_landmark, :2], landmark[:, :len_landmark])
             total_loss = landmark_loss2 + torch.mean(torch.square(shape)) * 1e-2 + torch.mean(torch.square(exp)) * 1e-2
             total_loss += torch.mean(torch.square(exp[1:] - exp[:-1])) * 1e-1
             
@@ -288,7 +318,7 @@ class Optimizer(object):
 
                 trans_landmarks2d = projection(landmarks2d_p, cam_intrinsics, w2c_p)
                 ## landmark loss
-                landmark_loss2 = lossfunc.l2_distance(trans_landmarks2d[:, -2:, :2], landmark[:, -2:])*10
+                landmark_loss2 = masked_l2_distance(trans_landmarks2d[:, -2:, :2], landmark[:, -2:], iris_valid) * 10
                 if k == 1:
                     print('----iter: 0, landmark_loss:', landmark_loss2.item())
                 total_loss =landmark_loss2+ torch.mean(torch.square(eye_pose[1:] - eye_pose[:-1])) *args.lambda_pose_diff*0.1
@@ -352,6 +382,36 @@ class Optimizer(object):
         except:
             iris_kpts = None
             print("Not using Iris keypoint")
+        # preprocess/iris.py emits an empty list for frames where MediaPipe
+        # FaceLandmarker failed to detect a face. Build a per-frame validity
+        # mask, and carry forward the nearest valid value as a placeholder so
+        # the rest of this function (reshape, bbox metadata) keeps working.
+        # The placeholder values are masked out of the iris loss term in
+        # `optimize()` and therefore do not influence parameter fitting.
+        iris_valid_per_basename = {}
+        if iris_kpts is not None:
+            ordered_basenames = [os.path.basename(p) for p in images_paths]
+            for n in ordered_basenames:
+                iris_valid_per_basename[n] = len(iris_kpts.get(n, [])) == 4
+            first_valid = next(
+                (iris_kpts[n] for n in ordered_basenames if iris_valid_per_basename[n]),
+                None,
+            )
+            if first_valid is None:
+                print("Not using Iris keypoint (all frames empty)")
+                iris_kpts = None
+            else:
+                last_valid = None
+                filled_iris = {}
+                for n in ordered_basenames:
+                    if iris_valid_per_basename[n]:
+                        last_valid = iris_kpts[n]
+                    filled_iris[n] = last_valid if last_valid is not None else first_valid
+                iris_kpts = filled_iris
+                num_invalid = sum(1 for v in iris_valid_per_basename.values() if not v)
+                if num_invalid:
+                    print(f"Iris missing on {num_invalid}/{len(ordered_basenames)} frames; "
+                          f"those frames are excluded from the iris loss.")
         visualize_images = []
         shape = []
         exps = []
@@ -398,8 +458,12 @@ class Optimizer(object):
         visualize_images = torch.cat(visualize_images, dim=0)
         # optimize
         
+        iris_valid_t = None
+        if iris_kpts is not None:
+            iris_valid_t = torch.tensor(
+                [iris_valid_per_basename[n] for n in name], dtype=torch.bool, device='cuda')
         op_code=self.optimize(shape, exps, landmarks, poses, name, visualize_images, savefolder, intrinsics, json_path, size,
-                      save_name,args)
+                      save_name, args, iris_valid=iris_valid_t)
         tracked_params={}
         tracked_params["world_mat"]=(op_code['frames'][0]["world_mat"]).copy()
         tracked_params["world_mat"].append([0.0,0.0,0.0,1.0])
