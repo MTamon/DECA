@@ -142,6 +142,7 @@ class TestData(Dataset):
                 dst_image = dst_image.transpose(2, 0, 1)
                 return {'image': torch.tensor(dst_image).float(),
                         'imagename': os.path.splitext(_hravatar_basename)[0],
+                        'image_basename': _hravatar_basename,
                         'tform': torch.tensor(tform.params).float(),
                         'original_image': torch.tensor(image.transpose(2, 0, 1)).float()}
             # HRAVATAR_STABLE_BBOX_GETITEM END
