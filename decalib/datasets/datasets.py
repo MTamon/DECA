@@ -47,7 +47,7 @@ def video2sequence(video_path, sample_step=10):
 
 
 class TestData(Dataset):
-    def __init__(self, testpath, iscrop=True, crop_size=224, scale=1.25, face_detector="fan", sample_step=10):
+    def __init__(self, testpath, iscrop=True, crop_size=224, scale=1.25, face_detector="fan", sample_step=10, precomputed_tforms_path=None):
         """
         testpath: folder, imagepath_list, image path, video path
         """
@@ -66,6 +66,26 @@ class TestData(Dataset):
         self.imagepath_list = sorted(self.imagepath_list)
         self.crop_size = crop_size
         self.scale = scale
+        # HRAVATAR_STABLE_BBOX_INIT BEGIN — load smoothed (basename -> tform) map.
+        # When `precomputed_tforms_path` points at a `.npz` written by
+        # HRAvatar's `preprocess/stable_bbox.py`, we use those tforms instead
+        # of running FAN per frame. Removes the mouth/blink leak that
+        # otherwise propagates into bbox `size` -> `cam[s]` -> renderer.
+        # Falls back to FAN per-frame for any frame whose basename is
+        # missing from the npz, so partial coverage is safe.
+        self._precomputed_tforms = None
+        if precomputed_tforms_path is not None and os.path.isfile(precomputed_tforms_path):
+            _hravatar_npz = np.load(precomputed_tforms_path, allow_pickle=False)
+            _hravatar_names = [str(_b) for _b in _hravatar_npz['frame_basenames']]
+            _hravatar_tforms = _hravatar_npz['tform']
+            self._precomputed_tforms = {
+                _name: _hravatar_tforms[_i]
+                for _i, _name in enumerate(_hravatar_names)
+            }
+            print(f'[deca/TestData] using precomputed stable bbox '
+                  f'({len(self._precomputed_tforms)} frames) from '
+                  f'{precomputed_tforms_path}')
+        # HRAVATAR_STABLE_BBOX_INIT END
         self.iscrop = iscrop
         self.resolution_inp = crop_size
         if face_detector == "fan":
@@ -104,6 +124,27 @@ class TestData(Dataset):
 
         h, w, _ = image.shape
         if self.iscrop:
+            # HRAVATAR_STABLE_BBOX_GETITEM BEGIN — short-circuit FAN with precomputed tform.
+            # If a smoothed similarity transform exists for this frame's basename,
+            # skip detection and warp directly. Downstream `code.json` `tform`
+            # then reflects the stabilised crop, so `optimize.py` and HRAvatar
+            # training all see the same (center, size) sequence frame-to-frame.
+            _hravatar_basename = os.path.basename(imagepath)
+            if (self._precomputed_tforms is not None
+                    and _hravatar_basename in self._precomputed_tforms):
+                _hravatar_params = self._precomputed_tforms[_hravatar_basename]
+                tform = estimate_transform('similarity',
+                                           np.eye(3)[:2, :2],
+                                           np.eye(3)[:2, :2])
+                tform.params[:] = _hravatar_params
+                dst_image = warp(image, tform.inverse,
+                                 output_shape=(self.crop_size, self.crop_size))
+                dst_image = dst_image.transpose(2, 0, 1)
+                return {'image': torch.tensor(dst_image).float(),
+                        'imagename': os.path.splitext(_hravatar_basename)[0],
+                        'tform': torch.tensor(tform.params).float(),
+                        'original_image': torch.tensor(image.transpose(2, 0, 1)).float()}
+            # HRAVATAR_STABLE_BBOX_GETITEM END
             # provide kpt as txt file, or mat file (for AFLW2000)
             kpt_matpath = os.path.splitext(imagepath)[0] + ".mat"
             kpt_txtpath = os.path.splitext(imagepath)[0] + ".txt"

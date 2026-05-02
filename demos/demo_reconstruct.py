@@ -35,7 +35,7 @@ def main(args):
     os.makedirs(savefolder, exist_ok=True)
 
     # load test images
-    testdata = datasets.TestData(args.inputpath, iscrop=args.iscrop, face_detector=args.detector, sample_step=args.sample_step)
+    testdata = datasets.TestData(args.inputpath, iscrop=args.iscrop, face_detector=args.detector, sample_step=args.sample_step, precomputed_tforms_path=args.precomputed_bbox)
 
     # run DECA
     deca_cfg.model.use_tex = args.useTex
@@ -140,4 +140,12 @@ if __name__ == '__main__':
                         help='whether to save FLAME parameters')
     parser.add_argument('--saveImages', default=False, type=lambda x: x.lower() in ['true', '1'],
                         help='whether to save visualization output as seperate images' )
+    # HRAVATAR_STABLE_BBOX_ARG BEGIN — accept the HRAvatar stable_bbox npz path.
+    parser.add_argument(
+        '--precomputed-bbox', type=str, default=None,
+        help=('Path to HRAvatar `stable_bbox.npz`. When supplied, the '
+              'smoothed similarity transform per frame replaces FAN '
+              'per-frame face detection, so DECA crops match the bbox '
+              'sequence consumed by `scene/data_loader.py` at training.'))
+    # HRAVATAR_STABLE_BBOX_ARG END
     main(parser.parse_args())
