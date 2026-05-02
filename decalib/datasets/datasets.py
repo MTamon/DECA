@@ -129,6 +129,11 @@ class TestData(Dataset):
             # skip detection and warp directly. Downstream `code.json` `tform`
             # then reflects the stabilised crop, so `optimize.py` and HRAvatar
             # training all see the same (center, size) sequence frame-to-frame.
+            #
+            # Returned dict mirrors the FAN-path return dict below verbatim — same
+            # keys ("imagename", "image_basename", "image", "tform",
+            # "original_image"), so demo_reconstruct.py and optimize.py treat the
+            # short-circuited frames identically to the FAN-detected ones.
             _hravatar_basename = os.path.basename(imagepath)
             if (self._precomputed_tforms is not None
                     and _hravatar_basename in self._precomputed_tforms):
@@ -137,14 +142,15 @@ class TestData(Dataset):
                                            np.eye(3)[:2, :2],
                                            np.eye(3)[:2, :2])
                 tform.params[:] = _hravatar_params
-                dst_image = warp(image, tform.inverse,
-                                 output_shape=(self.crop_size, self.crop_size))
+                _hravatar_image = image / 255.0
+                dst_image = warp(_hravatar_image, tform.inverse,
+                                 output_shape=(self.resolution_inp, self.resolution_inp))
                 dst_image = dst_image.transpose(2, 0, 1)
                 return {'image': torch.tensor(dst_image).float(),
                         'imagename': os.path.splitext(_hravatar_basename)[0],
                         'image_basename': _hravatar_basename,
                         'tform': torch.tensor(tform.params).float(),
-                        'original_image': torch.tensor(image.transpose(2, 0, 1)).float()}
+                        'original_image': torch.tensor(_hravatar_image.transpose(2, 0, 1)).float()}
             # HRAVATAR_STABLE_BBOX_GETITEM END
             # provide kpt as txt file, or mat file (for AFLW2000)
             kpt_matpath = os.path.splitext(imagepath)[0] + ".mat"
