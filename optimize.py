@@ -199,7 +199,7 @@ class Optimizer(object):
                 landmark_loss2 = face_loss + iris_loss
             else:
                 landmark_loss2 = lossfunc.l2_distance(trans_landmarks2d[:, :len_landmark, :2], landmark[:, :len_landmark])
-            total_loss = landmark_loss2 + torch.mean(torch.square(shape)) * 1e-2 + torch.mean(torch.square(exp)) * 1e-2
+            total_loss = landmark_loss2 + torch.mean(torch.square(shape)) * args.lambda_shape + torch.mean(torch.square(exp)) * args.lambda_exp  # HRAVATAR_OPTIMIZE_REGULARIZER
             total_loss += torch.mean(torch.square(exp[1:] - exp[:-1])) * 1e-1
             
             total_loss += torch.mean(torch.square(pose[1:] - pose[:-1])) *args.lambda_pose_diff
@@ -517,6 +517,12 @@ if __name__ == '__main__':
     parser.add_argument('--with_translation_camera', action="store_true",default=False)
     parser.add_argument('--lambda_translation_diff', type=float,default=5)
     parser.add_argument('--lambda_pose_diff', type=float,default=10)
+    # HRAVATAR_OPTIMIZE_REGULARIZER BEGIN: configurable shape / expression regularizer weights
+    parser.add_argument('--lambda_shape', type=float, default=1e-2,
+                        help='Weight on shape**2 regularizer in optimize().\nDefaults to 1e-2 to match the original HRAvatar fork. Increase to\n1.0-5.0 if optimize_vis.jpg shows an alien-looking enlarged head /\ncollapsed mid-face (the unregularized shape vector overfits landmarks).')
+    parser.add_argument('--lambda_exp', type=float, default=1e-2,
+                        help='Weight on exp**2 regularizer in optimize(). Defaults to 1e-2.')
+    # HRAVATAR_OPTIMIZE_REGULARIZER END
     args = parser.parse_args()
     model = Optimizer(args=args)
 
