@@ -124,7 +124,7 @@ class Optimizer(object):
         shape = nn.Parameter(shape)
         
         # set optimizer 1e-2
-        lr_opt=1e-2
+        lr_opt = args.main_lr  # HRAVATAR_OPTIMIZE_LR
         if json_path is None:
             opt_p = torch.optim.Adam(
                 [pose, exp, shape],
@@ -154,7 +154,10 @@ class Optimizer(object):
         print(shape.shape,exp.shape)
         len_landmark = landmark.shape[1]
         avg_lmk_loss=0.0
-        for k in range(1,1001):
+        _HRAV_MAIN_ITERS = args.max_iters  # HRAVATAR_OPTIMIZE_ITERS
+        _HRAV_BEST_LOSS = float('inf')  # HRAVATAR_OPTIMIZE_ITERS
+        _HRAV_BAD_WINDOWS = 0  # HRAVATAR_OPTIMIZE_ITERS
+        for k in range(1, _HRAV_MAIN_ITERS + 1):  # HRAVATAR_OPTIMIZE_ITERS
             full_pose = pose
             if not use_iris:
                 full_pose = torch.cat([full_pose, torch.zeros_like(full_pose[..., :6])], dim=1)
@@ -168,10 +171,11 @@ class Optimizer(object):
             verts_p *= 4
             landmarks3d_p *= 4
             landmarks2d_p *= 4
-            # if k%300==0:
-            #     lr_opt/=2
-            #     for param_group in opt_p.param_groups:
-            #         param_group['lr'] = lr_opt
+            # HRAVATAR_OPTIMIZE_LR BEGIN: opt-in step decay (per-group multiplicative)
+            if args.main_lr_decay_step > 0 and k % args.main_lr_decay_step == 0:
+                for _hrav_pg in opt_p.param_groups:
+                    _hrav_pg['lr'] *= args.main_lr_decay_factor
+            # HRAVATAR_OPTIMIZE_LR END
             # perspective projection
             # Global rotation is handled in FLAME, set camera rotation matrix to identity
             ident = torch.eye(3).float().cuda().unsqueeze(0).expand(num_img, -1, -1)
@@ -220,6 +224,19 @@ class Optimizer(object):
             total_loss.backward()
             opt_p.step()
             avg_lmk_loss+=landmark_loss2.item()
+            # HRAVATAR_OPTIMIZE_ITERS BEGIN: early-stop on plateau (main loop)
+            if args.early_stop_rel_tol > 0 and k % 100 == 0:
+                _hrav_cur = landmark_loss2.item()
+                if _hrav_cur < _HRAV_BEST_LOSS * (1.0 - args.early_stop_rel_tol):
+                    _HRAV_BEST_LOSS = _hrav_cur
+                    _HRAV_BAD_WINDOWS = 0
+                else:
+                    _HRAV_BAD_WINDOWS += 1
+                    if _HRAV_BAD_WINDOWS >= args.early_stop_patience:
+                        print(f'[early-stop] main optimize plateau at iter={k} '
+                              f'(best={_HRAV_BEST_LOSS:.6f}, cur={_hrav_cur:.6f})')
+                        break
+            # HRAVATAR_OPTIMIZE_ITERS END
             # visualize
             if k % 100 == 0:
                 with torch.no_grad():
@@ -293,7 +310,10 @@ class Optimizer(object):
                 lr=1e-2)
             len_landmark = landmark.shape[1]
             avg_lmk_loss=0.0
-            for k in range(1,501):
+            _HRAV_IRIS_ITERS = args.max_iris_iters  # HRAVATAR_OPTIMIZE_ITERS
+            _HRAV_BEST_LOSS_IRIS = float('inf')  # HRAVATAR_OPTIMIZE_ITERS
+            _HRAV_BAD_WINDOWS_IRIS = 0  # HRAVATAR_OPTIMIZE_ITERS
+            for k in range(1, _HRAV_IRIS_ITERS + 1):  # HRAVATAR_OPTIMIZE_ITERS
                 full_pose = pose.detach().clone()
                 full_pose[:, -6:] = eye_pose
                 verts_p, landmarks2d_p, landmarks3d_p = self.deca.flame(shape_params=shape.expand(num_img, -1),
@@ -327,6 +347,19 @@ class Optimizer(object):
                 total_loss.backward()
                 opt_p.step()
                 avg_lmk_loss+=landmark_loss2.item()
+                # HRAVATAR_OPTIMIZE_ITERS BEGIN: early-stop on plateau (iris loop)
+                if args.early_stop_rel_tol > 0 and k % 100 == 0:
+                    _hrav_cur = landmark_loss2.item()
+                    if _hrav_cur < _HRAV_BEST_LOSS_IRIS * (1.0 - args.early_stop_rel_tol):
+                        _HRAV_BEST_LOSS_IRIS = _hrav_cur
+                        _HRAV_BAD_WINDOWS_IRIS = 0
+                    else:
+                        _HRAV_BAD_WINDOWS_IRIS += 1
+                        if _HRAV_BAD_WINDOWS_IRIS >= args.early_stop_patience:
+                            print(f'[early-stop] iris optimize plateau at iter={k} '
+                                  f'(best={_HRAV_BEST_LOSS_IRIS:.6f}, cur={_hrav_cur:.6f})')
+                            break
+                # HRAVATAR_OPTIMIZE_ITERS END
                 # visualize
                 if k % 100 == 0:
                     with torch.no_grad():
@@ -523,6 +556,37 @@ if __name__ == '__main__':
     parser.add_argument('--lambda_exp', type=float, default=1e-2,
                         help='Weight on exp**2 regularizer in optimize(). Defaults to 1e-2.')
     # HRAVATAR_OPTIMIZE_REGULARIZER END
+    # HRAVATAR_OPTIMIZE_ITERS BEGIN: configurable iter caps + early-stop knobs
+    parser.add_argument('--max_iters', type=int, default=1000,
+                        help='Max iterations for the main DECA optimize loop. '
+                             'Default 1000 matches the original HRAvatar fork.')
+    parser.add_argument('--max_iris_iters', type=int, default=500,
+                        help='Max iterations for the iris-only optimize loop. '
+                             'Default 500 matches the original HRAvatar fork.')
+    parser.add_argument('--early_stop_rel_tol', type=float, default=0.0,
+                        help='Plateau tolerance on landmark_loss (checked every '
+                             '100 iter). 0.0 disables early-stop. 0.005-0.01 is '
+                             'typical when opting in.')
+    parser.add_argument('--early_stop_patience', type=int, default=2,
+                        help='Consecutive 100-iter windows without rel_tol '
+                             'improvement before breaking. Only used if '
+                             'early_stop_rel_tol > 0.')
+    # HRAVATAR_OPTIMIZE_ITERS END
+    # HRAVATAR_OPTIMIZE_LR BEGIN: configurable main-loop lr + opt-in step decay
+    parser.add_argument('--main_lr', type=float, default=1e-2,
+                        help='Initial Adam lr for main optimize loop pose/exp/shape '
+                             'param group. Default 1e-2 matches the original '
+                             'HRAvatar fork. eyelid/translation/translation_p lrs '
+                             'are not exposed (kept at fork defaults).')
+    parser.add_argument('--main_lr_decay_step', type=int, default=0,
+                        help='If >0, multiply every param-group lr by '
+                             '--main_lr_decay_factor every N iter of the main '
+                             'loop. 0 disables (default). Per-group ratios are '
+                             'preserved (unlike the HRAvatar fork commented form).')
+    parser.add_argument('--main_lr_decay_factor', type=float, default=0.5,
+                        help='Multiplier applied to every param-group lr at each '
+                             'decay step. Only used if --main_lr_decay_step > 0.')
+    # HRAVATAR_OPTIMIZE_LR END
     args = parser.parse_args()
     model = Optimizer(args=args)
 
